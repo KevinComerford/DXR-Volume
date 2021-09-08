@@ -6,10 +6,8 @@ using UnityEngine.Experimental.Rendering;
 
 public class SimpleRaytest : MonoBehaviour
 { 
-
     public RenderTexture renderTexture;
     public RayTracingShader rtshader;
-    public Camera cam;
 
     public Vector3Int Res = new Vector3Int(512,512,512);
 
@@ -25,7 +23,34 @@ public class SimpleRaytest : MonoBehaviour
     RayTracingAccelerationStructure accelerationStructure;
     Vector3Int threads;
 
+    struct PointLightData
+    {
+        //Point
+        public Vector3 PointLightsPos;
+        public Vector4 PointLightsColors;
+    }
 
+    struct ConeLightData
+    {
+        public Vector3 ConeLightsWS;
+        public Vector4 ConeLightsColors;
+        public Vector3 ConeLightsDir;
+        public Vector2 ConeLightsPram;
+    }
+
+    struct DirLightData
+    {
+        public Vector3 DirLightsDir;
+        public Vector4 DirLightsColors;
+    }
+    struct AreaLightData
+    {
+        public Matrix4x4 AreaLightsMatrix;
+        public Matrix4x4 AreaLightsMatrixInv;
+        public Vector3 AreaLightsPos;
+        public Vector4 AreaLightsColors;
+        public Vector3 AreaLightsSize;
+    }
 
 
     void Start()
@@ -56,7 +81,6 @@ public class SimpleRaytest : MonoBehaviour
        // threads = new Vector3Int(Mathf.FloorToInt(Res.x / 8f), Mathf.FloorToInt(Res.y / 8f), 1);
         threads = new Vector3Int(Res.x, Res.y, Res.z);
         SetUpLights();
-
     }
 
     void SetUpLights()
@@ -106,66 +130,55 @@ public class SimpleRaytest : MonoBehaviour
     {
         //  CollectGeo();
 
-        //if (Lights.Length > 512) { 
-        //    Debug.LogWarning("Too many lights. Yell at Kevin to the overflow feature");
-        //    return;}
+        //Set up buffers with data stride
+        ComputeBuffer pointBuffer = new ComputeBuffer(PointLights.Count, (3 + 4) * 4);
+        ComputeBuffer coneBuffer = new ComputeBuffer(ConeLights.Count, (3 + 4 + 3 + 2) * 4);
+        ComputeBuffer dirBuffer = new ComputeBuffer(DirectionalLights.Count, (3 + 4) * 4);
+        ComputeBuffer areaBuffer = new ComputeBuffer(AreaLights.Count, (4*4 + 4*4 + 3 + 4 + 3) * 4);
 
-        //Find sizes
-        int[] listsCount = new int[] { PointLights.Count, ConeLights.Count, DirectionalLights.Count, AreaLights.Count };
-        int maxCount =  Mathf.Max(listsCount);
+        PointLightData[] PointLDatas = new PointLightData[PointLights.Count];
+        ConeLightData[] ConeLDatas = new ConeLightData[ConeLights.Count];
+        DirLightData[] DirLDatas = new DirLightData[DirectionalLights.Count];
+        AreaLightData[] AreaLDatas = new AreaLightData[AreaLights.Count];
 
-
-
-        //Make new arrays
-        Vector4[] PointLightsPos = new Vector4[PointLights.Count];
-        Vector4[] PointLightsColors = new Vector4[PointLights.Count];
-
-        Vector4[] ConeLightsWS = new Vector4[ConeLights.Count];
-        Vector4[] ConeLightsColors = new Vector4[ConeLights.Count];
-        Vector4[] ConeLightsDir = new Vector4[ConeLights.Count];
-        Vector4[] ConeLightsPram = new Vector4[ConeLights.Count];
-
-        Vector4[] DirLightsDir = new Vector4[DirectionalLights.Count];
-        Vector4[] DirLightsColors = new Vector4[DirectionalLights.Count];
-
-        Vector4[] AreaLightsPos = new Vector4[AreaLights.Count];
-        Matrix4x4[] AreaLightsMatrix = new Matrix4x4[AreaLights.Count];
-        Matrix4x4[] AreaLightsMatrixInv = new Matrix4x4[AreaLights.Count];
-        Vector4[] AreaLightsColors = new Vector4[AreaLights.Count];
-        Vector4[] AreaLightsSize = new Vector4[AreaLights.Count];
-
-        for (int i =0; i< PointLightsPos.Length; i++)
+        for (int i =0; i< PointLDatas.Length; i++)
         {
-            PointLightsPos[i] =     PointLights[i].transform.position;
-            PointLightsColors[i] =  PointLights[i].color * PointLights[i].intensity;
+            PointLDatas[i].PointLightsPos = PointLights[i].transform.position;
+            PointLDatas[i].PointLightsColors =  PointLights[i].color * PointLights[i].intensity;
         }
 
-        for (int i = 0; i < ConeLightsWS.Length; i++)
+        for (int i = 0; i < ConeLDatas.Length; i++)
         {
-            ConeLightsWS[i] = ConeLights[i].transform.position;
-            ConeLightsColors[i] = ConeLights[i].color * ConeLights[i].intensity;
-            ConeLightsDir[i] = ConeLights[i].transform.forward;
+            ConeLDatas[i].ConeLightsWS = ConeLights[i].transform.position;
+            ConeLDatas[i].ConeLightsColors = ConeLights[i].color * ConeLights[i].intensity;
+            ConeLDatas[i].ConeLightsDir = ConeLights[i].transform.forward;
 
             float flPhiDot = Mathf.Clamp01(Mathf.Cos(ConeLights[i].spotAngle * 0.5f * Mathf.Deg2Rad)); // outer cone
             float flThetaDot = Mathf.Clamp01(Mathf.Cos(ConeLights[i].innerSpotAngle * 0.5f * Mathf.Deg2Rad)); // inner cone
 
-            ConeLightsPram[i] = new Vector4(flPhiDot, 1.0f / Mathf.Max(0.01f, flThetaDot - flPhiDot), 0, 0);
+            ConeLDatas[i].ConeLightsPram = new Vector4(flPhiDot, 1.0f / Mathf.Max(0.01f, flThetaDot - flPhiDot), 0, 0);
         }
 
-        for (int i = 0; i < DirLightsDir.Length; i++)
+        for (int i = 0; i < DirLDatas.Length; i++)
         {
-            DirLightsDir[i] = DirectionalLights[i].transform.forward;
-            DirLightsColors[i] = DirectionalLights[i].color * DirectionalLights[i].intensity;
+            DirLDatas[i].DirLightsDir = DirectionalLights[i].transform.forward;
+            DirLDatas[i].DirLightsColors = DirectionalLights[i].color * DirectionalLights[i].intensity;
         }
 
-        for (int i = 0; i < AreaLightsPos.Length; i++)
+        for (int i = 0; i < AreaLDatas.Length; i++)
         {
-            AreaLightsPos[i] = AreaLights[i].transform.position;
-            AreaLightsMatrix[i] = Matrix4x4.TRS(AreaLights[i].transform.position, AreaLights[i].transform.rotation , Vector3.one);
-            AreaLightsMatrixInv[i] = AreaLightsMatrix[i].inverse;
-            AreaLightsColors[i] = AreaLights[i].color * AreaLights[i].intensity;
-            AreaLightsSize[i] = new Vector3( AreaLights[i].areaSize.x, AreaLights[i].areaSize.y, AreaLights[i].type == LightType.Disc ? 1:0 ) ; //Packing for area or disc logic
+            AreaLDatas[i].AreaLightsPos = AreaLights[i].transform.position;
+            AreaLDatas[i].AreaLightsMatrix = Matrix4x4.TRS(AreaLights[i].transform.position, AreaLights[i].transform.rotation , Vector3.one);
+            AreaLDatas[i].AreaLightsMatrixInv = AreaLDatas[i].AreaLightsMatrix.inverse;
+            AreaLDatas[i].AreaLightsColors = AreaLights[i].color * AreaLights[i].intensity;
+            AreaLDatas[i].AreaLightsSize = new Vector3( AreaLights[i].areaSize.x, AreaLights[i].areaSize.y, AreaLights[i].type == LightType.Disc ? 1:0 ) ; //Packing for area or disc logic
         }
+
+        pointBuffer.SetData(PointLDatas);
+        coneBuffer.SetData(ConeLDatas);
+        dirBuffer.SetData(DirLDatas);
+        areaBuffer.SetData(AreaLDatas);
+
 
         //General
         rtshader.SetVector("Size", Vector3.one * scaler);
@@ -173,36 +186,30 @@ public class SimpleRaytest : MonoBehaviour
         rtshader.SetFloat("_Seed", ( Random.Range(0.0f,64.0f) ) );
 
         //Point
-        rtshader.SetVectorArray("PointLightsWS", PointLightsPos);
-        rtshader.SetVectorArray("PointLightsColor", PointLightsColors);
-        rtshader.SetInt("PointLightCount", PointLightsPos.Length); //Add a stack overflow loop or computebuffer
+        rtshader.SetInt("PointLightCount", PointLDatas.Length); //Add a stack overflow loop or computebuffer
+        rtshader.SetBuffer("PLD", pointBuffer); ;
 
         //Cone
-        rtshader.SetVectorArray("ConeLightsWS", ConeLightsWS);
-        rtshader.SetVectorArray("ConeLightsColor", ConeLightsColors);
-        rtshader.SetVectorArray("ConeLightsDir", ConeLightsDir);
-        rtshader.SetVectorArray("ConeLightsPram", ConeLightsPram);
-        rtshader.SetInt("ConeLightCount", ConeLightsWS.Length); //Add a stack overflow loop or computebuffer
+        rtshader.SetInt("ConeLightCount", ConeLDatas.Length); //Add a stack overflow loop or computebuffer
+        rtshader.SetBuffer("CLD", coneBuffer);
 
         //Directional
-        rtshader.SetVectorArray("DirLightsDir", DirLightsDir);
-        rtshader.SetVectorArray("DirLightsColor", DirLightsColors);
-        rtshader.SetInt("DirLightCount", DirLightsDir.Length); //Add a stack overflow loop or computebuffer
+        rtshader.SetInt("DirLightCount", DirLDatas.Length); //Add a stack overflow loop or computebuffer
+        rtshader.SetBuffer("DLD", dirBuffer);
 
         //Area
-        rtshader.SetMatrixArray("AreaLightsMatrix", AreaLightsMatrix );
-        rtshader.SetMatrixArray("AreaLightsMatrixInv", AreaLightsMatrixInv);
-        rtshader.SetVectorArray("AreaLightsWS", AreaLightsPos);        
-        rtshader.SetVectorArray("AreaLightsColor", AreaLightsColors);
-        rtshader.SetVectorArray("AreaLightsSize", AreaLightsSize);
-        rtshader.SetInt("AreaLightCount", AreaLightsPos.Length); //Add a stack overflow loop or computebuffer
+        rtshader.SetInt("AreaLightCount", AreaLDatas.Length); //Add a stack overflow loop or computebuffer
         rtshader.SetInt("AreaLightSamples", System.Convert.ToInt32(AreaLightSamples) );
+        rtshader.SetBuffer("ALD", areaBuffer);
 
         //Dispatching
         rtshader.Dispatch("MainRayGenShader", threads.x, threads.y, threads.z);
+
+        pointBuffer.Release();
+        coneBuffer.Release();
+        dirBuffer.Release();
+        areaBuffer.Release();
     }
-
-
     void CollectGeo()
     {
         Renderer[] Meshes = FindObjectsOfType<Renderer>();
@@ -213,8 +220,5 @@ public class SimpleRaytest : MonoBehaviour
         }
         accelerationStructure.Build();
         rtshader.SetAccelerationStructure("g_SceneAccelStruct", accelerationStructure);
-
     }
-
-
 }
