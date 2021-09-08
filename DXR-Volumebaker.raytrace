@@ -1,13 +1,11 @@
 #include "UnityShaderVariables.cginc"
-#include "Noise.cginc"
-#pragma exclude_renderers d3d11
+//#include "Noise.cginc"
 #pragma only_renderers d3d12
 
 #pragma max_recursion_depth 1
 
 #define M_PI 3.1415926535897932384626433832795
 
-#define LightBatch 128
 
 // Input
 RaytracingAccelerationStructure g_SceneAccelStruct;
@@ -25,9 +23,9 @@ float4	PointLightsColor;
 };
 
 struct ConeLightData{
-float3	ConeLightsWS	;
-float3	ConeLightsDir	;
+float3	ConeLightsWS;
 float4	ConeLightsColor	;
+float3	ConeLightsDir	;
 float2	ConeLightsPram	; //Outter , inner
 };
 
@@ -90,7 +88,7 @@ float rand(float3 Pixel)
 	return result;
 }
 
-//Casts ray from voxel to point light. If there's a hit, the voxel is in shadow.
+///
 ///Point light
 ///
 float4 PointLightCast(float3 VoxelWS, uint Num){
@@ -275,7 +273,7 @@ float4 DiscLightCast(float3 VoxelWS, uint Num){
 [shader("raygeneration")]
 void MainRayGenShader()
 {
-    float3 launchIndex = DispatchRaysIndex().xyz; //id
+    float3 launchIndex = DispatchRaysIndex().xyz + float3(.5,.5,.5); //id
     float3 launchDim = DispatchRaysDimensions().xyz; //whd
     float3 VoxelWorldPosition = WPosition + ( ( launchIndex/launchDim ) / Size );
 
@@ -288,59 +286,5 @@ void MainRayGenShader()
       if (ALD[i].AreaLightsSize.z == 0)  LightAccumulation += AreaLightCast(VoxelWorldPosition, i) ; 
       else  LightAccumulation += DiscLightCast(VoxelWorldPosition, i) ;
     }
-
-
-    g_Output[launchIndex] = LightAccumulation; // += for light multipass
+    g_Output[launchIndex] = LightAccumulation;
 }
-///////////////////////////////////////
-
-//
-//[numthreads(4, 4, 4)]
-//void RectangleLight(uint3 id : SV_DispatchThreadID) {
-
-//	float3 whd;
-//	AccumulatedLights.GetDimensions(whd.x, whd.y, whd.z);
-//	float3 VoxelWorldPosition = Position + ((id + 0.5) / (whd / Size));
-
-//	float4 MonteCarlointegration = float4(0, 0, 0, 0);
-
-//	for (int i = 0; i < AreaLightSamples; i++) {
-
-//		float4 ShadowColor = float4(1, 1, 1, 1);
-
-//		float3 VoxelDirectionToLight = -normalize(VoxelWorldPosition - LightPosition);
-
-//		float Facing = saturate(dot(LightDirection, -VoxelDirectionToLight)); //Intal direction check
-
-//		//Only cast rays from one side of the light
-//		if (Facing > 0){
-
-//			float3 LightPosSample = LightPosition + mul(AreaMatrix, float3( (rand(id.xyz)-0.5) * AreaSize.x , (rand(id.xyz) - 0.5) * AreaSize.y, 0) );
-
-//			VoxelDirectionToLight = -normalize(VoxelWorldPosition - LightPosSample);
-
-//			float LightRadius = (distance(VoxelWorldPosition, LightPosSample)); //Distance from center of voxel
-
-//			float attenuation = saturate(dot(LightDirection, -VoxelDirectionToLight));
-
-//			Ray PointShadowRay = CreateRay(VoxelWorldPosition, -normalize(VoxelWorldPosition - LightPosSample) );
-
-//			RayHit PointShadowHit = Trace(PointShadowRay);
-
-//			if (PointShadowHit.distance < LightRadius)
-//			{
-//				//todo: Account for tinted materials to make colored shadows
-//				ShadowColor *= 0;
-//			}
-//			//TODO: figure out what's unity's area lighting model is and match it 
-//			float4 inverseSquareColor = (LightColor ) / (4 * M_PI * LightRadius * LightRadius);
-
-//			MonteCarlointegration += (inverseSquareColor * ShadowColor * attenuation) / AreaLightSamples;
-
-//		}
-//		//Currently just doing the inverse square law for falloff. Figure out physical scattering and absorption 
-//	}
-
-////	AccumulatedLights[id] += MonteCarlointegration;
-//	SaveLightTexture(id, MonteCarlointegration);
-//}
