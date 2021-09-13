@@ -1,4 +1,12 @@
 #include "UnityShaderVariables.cginc"
+#include "UnityRaytracingMeshUtils.cginc"
+#include "HLSLSupport.cginc"
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
+
 //#include "Noise.cginc"
 #pragma only_renderers d3d12
 
@@ -16,6 +24,7 @@ uint	ConeLightCount;
 uint	DirLightCount;
 uint	AreaLightCount;
 uint	AreaLightSamples;
+uint	EnvLightSamples;
 
 struct PointLightData{
 float3	PointLightsWS;
@@ -58,18 +67,51 @@ struct RayPayload
     float4 color;
 };
 
+struct EnvRayPayload
+{
+    float4 color;
+    float3 dir;
+};
+
+struct Material
+{
+    float3 emissive;    
+};
+
+struct AttributeData
+{
+    float2 barycentrics; 
+};
+
+struct Vertex
+{
+    float2 texcoord;
+};
+
+TextureCube  _SkyTexture;
+SamplerState  sampler_SkyTexture;
+
+
+//Miss for raycasting from voxel to light. Miss means that the ray is unobscured from the source light 
 [shader("miss")]
 void MainMissShader(inout RayPayload payload : SV_RayPayload)
 {
     payload.color = float4(1, 1, 1, 1);
 }
 
+//
+[shader("miss")]
+void zEnvMissShader(inout EnvRayPayload payload : SV_RayPayload)
+{
+    //Enviormental    
+    payload.color = _SkyTexture.SampleLevel(sampler_SkyTexture, payload.dir, 5);
+}
+
 float InverseSquare(float distance){
 	return	1 / (4 * M_PI * distance * distance);
 }
 
-//float _Seed;
-
+//Dumb coarse randomizers
 float rand(float2 Pixel)
 {
     float _Seed = Pixel.x + Pixel.y ;
@@ -266,6 +308,47 @@ float4 DiscLightCast(float3 VoxelWS, uint Num){
 	return  areaLightAccumulation;
 }
 
+//Cast Ray from vox to env
+float4 EnvCast(float3 VoxelWS){
+
+    float4 Accumulation = float4(0,0,0,0);
+
+   for (int j = 0; j < EnvLightSamples; j++) 
+    {
+
+        int _RaytracingFrameIndex = 100; //temp cast
+
+        int globalSampleIndex = _RaytracingFrameIndex * EnvLightSamples + j;
+
+        float2 theSample;
+      //  theSample.x = GetBNDSequenceSample(VoxelWS, globalSampleIndex, 0);
+     //   theSample.y = GetBNDSequenceSample(VoxelWS, globalSampleIndex, 1);
+        uint3 id =  DispatchRaysIndex().xyz; //redundent, oh well
+
+        theSample.x = rand(id.xyz + j * 5);
+        theSample.y = rand(id.xyz + j + 23);
+
+        float3 rayDirection = SampleSphereUniform(theSample.x, theSample.y);
+
+        RayDesc ray;
+        ray.Origin    = VoxelWS;
+        ray.Direction = rayDirection;
+        ray.TMin      = 0.0f;
+        ray.TMax      = 100000;
+
+        RayPayload payload;
+        payload.color = float4(0, 0, 0, 0);
+
+        uint missShaderIndex = 1;
+        TraceRay(g_SceneAccelStruct, 0, 0xFF, 0, 1, missShaderIndex, ray, payload);
+        
+        Accumulation += payload.color / EnvLightSamples ;
+    }
+    return Accumulation;
+}
+
+
+
 //
 // Main shader
 //
@@ -286,5 +369,7 @@ void MainRayGenShader()
       if (ALD[i].AreaLightsSize.z == 0)  LightAccumulation += AreaLightCast(VoxelWorldPosition, i) ; 
       else  LightAccumulation += DiscLightCast(VoxelWorldPosition, i) ;
     }
+    LightAccumulation += EnvCast(VoxelWorldPosition);
+
     g_Output[launchIndex] = LightAccumulation;
 }

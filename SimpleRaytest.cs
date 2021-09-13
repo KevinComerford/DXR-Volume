@@ -17,6 +17,8 @@ public class SimpleRaytest : MonoBehaviour
     public Renderer DebugRenderer;
     public Light[] Lights;
     public uint AreaLightSamples = 16;
+    public uint EnviormentalLightSamples = 128;
+    public Cubemap EnvCubemap;
 
     List<Light> PointLights,ConeLights,DirectionalLights,AreaLights;
 
@@ -202,6 +204,13 @@ public class SimpleRaytest : MonoBehaviour
         rtshader.SetInt("AreaLightSamples", System.Convert.ToInt32(AreaLightSamples) );
         rtshader.SetBuffer("ALD", areaBuffer);
 
+        rtshader.SetInt("EnvLightSamples", System.Convert.ToInt32(EnviormentalLightSamples) );
+
+        rtshader.SetShaderPass("Raytest");
+        //VertexAttributeInfo attributeInfo = new VertexAttributeInfo();
+        //ComputeBuffer attBuffer = new ComputeBuffer(1,4*2); //uint = 2bytes
+        rtshader.SetTexture("_SkyTexture", EnvCubemap);
+
         //Dispatching
         rtshader.Dispatch("MainRayGenShader", threads.x, threads.y, threads.z);
 
@@ -210,6 +219,14 @@ public class SimpleRaytest : MonoBehaviour
         dirBuffer.Release();
         areaBuffer.Release();
     }
+
+    struct VertexAttributeInfo
+    {
+        uint InputSlot;         // Not supported. Always assumed to be 0.
+        uint Format;
+        uint ByteOffset;
+        uint Dimension;
+    };
     void CollectGeo()
     {
         Renderer[] Meshes = FindObjectsOfType<Renderer>();
