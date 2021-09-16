@@ -83,6 +83,7 @@ public class SimpleRaytest : MonoBehaviour
        // threads = new Vector3Int(Mathf.FloorToInt(Res.x / 8f), Mathf.FloorToInt(Res.y / 8f), 1);
         threads = new Vector3Int(Res.x, Res.y, Res.z);
         SetUpLights();
+        MakeCubemap();
     }
 
     void SetUpLights()
@@ -127,6 +128,25 @@ public class SimpleRaytest : MonoBehaviour
     {
         UpdateLights();
     }
+    void MakeCubemap()
+    {
+        if (EnvCubemap == null)
+        {
+
+            RenderTexture cubetex = new RenderTexture(128, 128, 1, RenderTextureFormat.ARGB32);
+            cubetex.enableRandomWrite = true;
+            cubetex.dimension = UnityEngine.Rendering.TextureDimension.Cube;
+            cubetex.Create();
+
+            Camera renderCam = new GameObject().AddComponent<Camera>();
+            renderCam.cullingMask = 0;
+            renderCam.RenderToCubemap(cubetex);
+            rtshader.SetTexture("_SkyTexture", cubetex);
+
+            Destroy(renderCam);
+        }
+    }
+
 
     private void UpdateLights()
     {
@@ -209,7 +229,7 @@ public class SimpleRaytest : MonoBehaviour
         rtshader.SetShaderPass("Raytest");
         //VertexAttributeInfo attributeInfo = new VertexAttributeInfo();
         //ComputeBuffer attBuffer = new ComputeBuffer(1,4*2); //uint = 2bytes
-        rtshader.SetTexture("_SkyTexture", EnvCubemap);
+        if (EnvCubemap != null) rtshader.SetTexture("_SkyTexture", EnvCubemap);
 
         //Dispatching
         rtshader.Dispatch("MainRayGenShader", threads.x, threads.y, threads.z);
